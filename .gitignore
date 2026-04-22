@@ -6,7 +6,7 @@ __pycache__/
 .Python
 
 # Data - too large for git
-data/
+/data/
 
 # Model checkpoints
 checkpoints/
