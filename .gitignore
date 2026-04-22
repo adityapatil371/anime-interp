@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# Data - too large for git
+data/
+
+# Model checkpoints
+checkpoints/
+*.pth
+*.pt
+
+# Logs
+runs/
+logs/
+
+# Mac
+.DS_Store
+
+# IDE
+.vscode/
