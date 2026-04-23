@@ -98,7 +98,6 @@ class MeanShift(nn.Conv2d):
 class VGGPerceptualLoss(torch.nn.Module):
     def __init__(self, rank=0):
         super(VGGPerceptualLoss, self).__init__()
-        blocks = []
         pretrained = True
         self.vgg_pretrained_features = models.vgg19(pretrained=pretrained).features
         self.normalize = MeanShift([0.485, 0.456, 0.406], [0.229, 0.224, 0.225], norm=True).cuda()

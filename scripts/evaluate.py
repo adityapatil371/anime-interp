@@ -64,8 +64,7 @@ def evaluate(
             levels = batch["level"]   # list of ints
 
             pred = model(img0, img1, dist_a, dist_b)
-            metrics = metrics_fn.compute(pred, gt)
-
+            
             # Store per sample per level
             # levels is a tensor of shape (B,)
             for i, level in enumerate(levels):
@@ -157,7 +156,6 @@ def main():
     ).to(device)
 
     # Monkey-patch forward to skip Unet
-    original_forward = baseline_model.forward
     def baseline_forward(img0, img1, dist_a, dist_b, scale_list=None):
         with torch.no_grad():
             merged, flow, mask, w0, w1 = baseline_model.ifnet(
@@ -192,7 +190,7 @@ def main():
 
     # --- Delta table ---
     print(f"\n{'='*60}")
-    print(f"  Delta (Fine-tuned - Baseline)")
+    print("  Delta (Fine-tuned - Baseline)")
     print(f"{'='*60}")
     print(f"  {'Split':<12} {'ΔPSNR':>8} {'ΔSSIM':>8} {'ΔLPIPS':>8}")
     print(f"  {'-'*40}")

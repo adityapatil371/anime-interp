@@ -183,7 +183,7 @@ def main():
                 pbar.set_postfix(computed=computed, skipped=skipped)
 
     print(f"\nDone. Computed: {computed}, Skipped: {skipped}")
-    print(f"Distance maps saved as _dist.npy next to each frame.")
+    print("Distance maps saved as _dist.npy next to each frame.")
 
 
 if __name__ == "__main__":

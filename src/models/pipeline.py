@@ -20,7 +20,6 @@ import torch.nn as nn
 
 from src.models.ifnet import IFNet
 from src.models.refinenet import UnetWithDistance
-from src.models.warplayer import warp
 
 
 class AnimeInterpPipeline(nn.Module):
