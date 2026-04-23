@@ -131,7 +131,11 @@ shutil.copy(path, 'checkpoints/flownet.pkl')
 "
 ```
 
-Download fine-tuned UnetWithDistance weights from [Releases](https://github.com/adityapatil371/anime-interp/releases).
+Download fine-tuned UnetWithDistance weights:
+
+```bash
+wget https://github.com/adityapatil371/anime-interp/releases/download/v1.0/unet_best.pth -P checkpoints/
+```
 
 ---
 
