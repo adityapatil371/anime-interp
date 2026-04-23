@@ -16,8 +16,6 @@ scikit-image==0.23.2
 tqdm==4.66.4
 tensorboard==2.17.0
 
-# Gradio demo
-gradio==4.36.1
 
 # Data
 requests==2.32.3

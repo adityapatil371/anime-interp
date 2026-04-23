@@ -1,11 +1,9 @@
 """
-Gradio demo for anime frame interpolation.
+Generate side-by-side comparison images for the README demo.
 
-Upload two consecutive anime frames, get the interpolated middle frame.
-
-Run:
-    python app.py
-    python app.py --unet-checkpoint checkpoints/unet_best.pth
+Usage:
+    python app.py --triplet-dir data/datasets/test_2k_540p/Disney_v4_0_000024_s2
+    python app.py --frame-a frame1.png --frame-b frame3.png --gt frame2.png
 """
 
 import argparse
@@ -14,13 +12,12 @@ import sys
 
 import numpy as np
 import torch
-import gradio as gr
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from src.models.pipeline import AnimeInterpPipeline
-from src.utils.edge import compute_distance_map
+from src.utils.edge import compute_distance_map, load_frame
 
 
 def get_device() -> torch.device:
@@ -31,139 +28,87 @@ def get_device() -> torch.device:
     return torch.device("cpu")
 
 
-def load_model(
-    checkpoint_path: str,
-    unet_checkpoint: str,
-    device: torch.device,
-) -> AnimeInterpPipeline:
+def frame_to_tensor(path, size, device):
+    frame = load_frame(path)
+    img = Image.fromarray(frame).resize((size[1], size[0]), Image.LANCZOS)
+    arr = np.array(img)
+    dist = compute_distance_map(arr)
+    t = torch.from_numpy(arr.astype(np.float32) / 255.0).permute(2, 0, 1).unsqueeze(0).to(device)
+    d = torch.from_numpy(dist).unsqueeze(0).unsqueeze(0).to(device)
+    return t, d, arr
+
+
+def add_label(img_arr, label):
+    """Add a text label below an image."""
+    img = Image.fromarray(img_arr)
+    labeled = Image.new("RGB", (img.width, img.height + 24), (20, 20, 20))
+    labeled.paste(img, (0, 0))
+    draw = ImageDraw.Draw(labeled)
+    draw.text((img.width // 2, img.height + 4), label, fill=(220, 220, 220), anchor="mt")
+    return np.array(labeled)
+
+
+def make_comparison(frame_a, pred, gt, frame_b, output_path):
+    """Create a 4-panel side by side comparison."""
+    panels = [
+        add_label(frame_a, "Frame A (t=0)"),
+        add_label(pred,    "Predicted (t=0.5)"),
+        add_label(gt,      "Ground Truth (t=0.5)"),
+        add_label(frame_b, "Frame B (t=1)"),
+    ]
+    combined = np.concatenate(panels, axis=1)
+    Image.fromarray(combined).save(output_path)
+    print(f"Saved comparison to {output_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--triplet-dir",     type=str, default=None)
+    parser.add_argument("--frame-a",         type=str, default=None)
+    parser.add_argument("--frame-b",         type=str, default=None)
+    parser.add_argument("--gt",              type=str, default=None)
+    parser.add_argument("--output",          type=str, default="comparison.png")
+    parser.add_argument("--checkpoint",      default="checkpoints/flownet.pkl")
+    parser.add_argument("--unet-checkpoint", default="checkpoints/unet_best.pth")
+    parser.add_argument("--size",            type=int, nargs=2,
+                        default=[256, 256], metavar=("H", "W"))
+    args = parser.parse_args()
+
+    # Resolve paths
+    if args.triplet_dir:
+        ext = ".png" if os.path.exists(os.path.join(args.triplet_dir, "frame1.png")) else ".jpg"
+        path_a  = os.path.join(args.triplet_dir, f"frame1{ext}")
+        path_gt = os.path.join(args.triplet_dir, f"frame2{ext}")
+        path_b  = os.path.join(args.triplet_dir, f"frame3{ext}")
+    else:
+        path_a, path_gt, path_b = args.frame_a, args.gt, args.frame_b
+
+    device = get_device()
+    size   = tuple(args.size)
+
     model = AnimeInterpPipeline(
-        checkpoint_path=checkpoint_path,
+        checkpoint_path=args.checkpoint,
         device=device,
     ).to(device)
 
-    if unet_checkpoint and os.path.exists(unet_checkpoint):
-        ckpt = torch.load(unet_checkpoint, map_location=device)
+    if os.path.exists(args.unet_checkpoint):
+        ckpt = torch.load(args.unet_checkpoint, map_location=device)
         model.unet.load_state_dict(ckpt["unet_state_dict"])
-        print(f"Loaded fine-tuned Unet from {unet_checkpoint}")
-    else:
-        print("Using baseline IFNet only (no fine-tuned Unet)")
+        print(f"Loaded Unet from {args.unet_checkpoint}")
 
     model.eval()
-    return model
 
-
-def prepare_frame(
-    pil_image: Image.Image,
-    size: tuple,
-    device: torch.device,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Convert PIL image to model input tensors."""
-    img = pil_image.convert("RGB").resize(
-        (size[1], size[0]), Image.LANCZOS
-    )
-    arr = np.array(img)
-    dist = compute_distance_map(arr)
-
-    frame_t = torch.from_numpy(
-        arr.astype(np.float32) / 255.0
-    ).permute(2, 0, 1).unsqueeze(0).to(device)
-
-    dist_t = torch.from_numpy(dist).unsqueeze(0).unsqueeze(0).to(device)
-
-    return frame_t, dist_t
-
-
-def interpolate(
-    frame_a: np.ndarray,
-    frame_b: np.ndarray,
-    model: AnimeInterpPipeline,
-    device: torch.device,
-    size: tuple = (256, 256),
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Gradio inference function.
-
-    Args:
-        frame_a: numpy array from Gradio image input
-        frame_b: numpy array from Gradio image input
-
-    Returns:
-        tuple of (frame_a, interpolated, frame_b) for side-by-side display
-    """
-    if frame_a is None or frame_b is None:
-        return None, None, None
-
-    pil_a = Image.fromarray(frame_a.astype(np.uint8))
-    pil_b = Image.fromarray(frame_b.astype(np.uint8))
-
-    img0, dist_a = prepare_frame(pil_a, size, device)
-    img1, dist_b = prepare_frame(pil_b, size, device)
+    img0, dist_a, arr_a = frame_to_tensor(path_a,  size, device)
+    img1, dist_b, arr_b = frame_to_tensor(path_b,  size, device)
+    _,    _,      arr_gt = frame_to_tensor(path_gt, size, device)
 
     with torch.no_grad():
         pred = model(img0, img1, dist_a, dist_b)
 
     pred_np = (pred[0].cpu().numpy().transpose(1, 2, 0) * 255).astype(np.uint8)
 
-    # Also resize inputs for consistent display
-    a_display = np.array(pil_a.resize((size[1], size[0])))
-    b_display = np.array(pil_b.resize((size[1], size[0])))
-
-    return a_display, pred_np, b_display
-
-
-def build_demo(model, device, size):
-    with gr.Blocks(title="Anime Frame Interpolation") as demo:
-        gr.Markdown("""
-        # Anime Frame Interpolation
-        Upload two consecutive anime frames. The model predicts the missing middle frame.
-        Fine-tuned on ATD-12K with distance-map guided refinement for anime flat colour regions.
-        """)
-
-        with gr.Row():
-            input_a = gr.Image(label="Frame A (t=0)", type="numpy")
-            input_b = gr.Image(label="Frame B (t=1)", type="numpy")
-
-        btn = gr.Button("Interpolate", variant="primary")
-
-        with gr.Row():
-            out_a      = gr.Image(label="Frame A")
-            out_interp = gr.Image(label="Interpolated (t=0.5)")
-            out_b      = gr.Image(label="Frame B")
-
-        btn.click(
-            fn=lambda a, b: interpolate(a, b, model, device, size),
-            inputs=[input_a, input_b],
-            outputs=[out_a, out_interp, out_b],
-        )
-
-        gr.Markdown("""
-        ### How it works
-        1. IFNet estimates optical flow between Frame A and Frame B
-        2. Frames are warped toward t=0.5 using the estimated flow
-        3. UnetWithDistance refines the result using distance transform maps
-           that explicitly identify flat colour regions prone to colour bleeding
-        """)
-
-    return demo
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint",      default="checkpoints/flownet.pkl")
-    parser.add_argument("--unet-checkpoint", default="checkpoints/unet_best.pth")
-    parser.add_argument("--size",            type=int, nargs=2,
-                        default=[256, 256], metavar=("H", "W"))
-    parser.add_argument("--share",           action="store_true",
-                        help="Create public Gradio link")
-    args = parser.parse_args()
-
-    device = get_device()
-    print(f"Device: {device}")
-
-    model = load_model(args.checkpoint, args.unet_checkpoint, device)
-    demo  = build_demo(model, device, tuple(args.size))
-
-    demo.launch(share=args.share)
+    make_comparison(arr_a, pred_np, arr_gt, arr_b, args.output)
+    os.system(f"open {args.output}")
 
 
 if __name__ == "__main__":
