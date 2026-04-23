@@ -22,3 +22,5 @@ logs/
 
 # IDE
 .vscode/
+input/
+output/

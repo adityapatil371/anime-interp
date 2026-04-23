@@ -29,4 +29,7 @@ docker-build:
 	docker build -t anime-interp .
 
 docker-run:
-	docker run -p 7860:7860 anime-interp
+	docker run -v $(PWD)/input:/app/input -v $(PWD)/output:/app/output anime-interp \
+		--frame-a input/frame_a.png \
+		--frame-b input/frame_b.png \
+		--output output/interpolated.png
